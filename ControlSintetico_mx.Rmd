@@ -1,0 +1,367 @@
+---
+title: "Untitled"
+author: "Leobardo Enriquez"
+date: "11/22/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Ejercicios de control sintético para la propuesta de investigación de Microeconometría - diciembre de 2021. 
+
+## Ejercicio 1. Análisis 1995 a 2020 con año de tratamiento 1999.
+
+
+```{r, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(haven)
+library(Synth)
+library(devtools)
+if(!require(SCtools)) devtools::install_github("bcastanho/SCtools")
+library(SCtools)
+library("readxl")
+```
+
+
+Usaremos un data panel en el que tenemos indicadores de crecimiento del PIB y la inflación anual para los países que implementaron inflation targeting en 1999 en Latinoamérica (Brazil, Chile, Colombia y México) y de 22 países que no lo hicieron en Latinoamérica y el Caribe, tales como: Argentina, Aruba, Bahamas, Barbados, Bolivia, Costa Rica, Dominica, Dominican Republic, Ecuador, El Salvador, Grenada, Guyana, Haiti, Honduras, Jamaica, Nicaragua, Panama, St Kitts and Nevis, St Lucia, St Vincent and the Grenadines, Suriname y Trinidad and Tobago. 
+
+Consideramos las variables de Brazil, Chile, Colombia y México como las de un solo país  "ITcountries" tomando los promedios tanto de inflación como del crecimiento. Por lo tanto nuestro país de tratamiento es ITcountries y los países de control son los que no aplicaron inflation targeting ya mencionados. 
+
+
+```{r, include=FALSE, echo=FALSE}
+rm(list = ls())
+read_data <- function(df)
+{
+  full_path <- paste("https://github.com/LeoEnriquez/SyntheticControl1", 
+                     df, sep = "")
+  df <- read_dta(full_path)
+  return(df)
+}
+
+ITcountries <- read_excel("ITcountries.xlsx") %>%
+  as.data.frame(.)
+
+```
+
+
+
+```{r, include=FALSE, echo=FALSE}
+# https://www.rdocumentation.org/packages/Synth/versions/1.1-5/topics/dataprep
+# https://mixtape.scunning.com/synthetic-control.html?panelset=r-code&panelset1=r-code2&panelset2=r-code3
+dataprep_out <- dataprep(
+  foo = ITcountries,
+  predictors = c("growth"),
+  predictors.op = "mean",
+  time.predictors.prior = 1995:1999,
+  special.predictors = list(
+    list("inflation", c(1996, 1997, 1998), "mean")),
+  dependent = "inflation",
+  unit.variable = "id2",
+  unit.names.variable = "country",
+  time.variable = "year",
+  treatment.identifier = 16,
+  controls.identifier = c(1:8,10:15,17:23),
+  time.optimize.ssr = 1995:1999,
+  time.plot = 1995:2020
+)
+
+synth_out <- synth(data.prep.obj = dataprep_out)
+
+```
+
+
+
+Se selecciona un conjunto óptimo de ponderaciones que, cuando se aplique al resto del país, produzca la figura que se muestra a continuación. Tenga en cuenta que el tratamiento previo, este conjunto de ponderaciones, produce una trayectoria temporal casi idéntica para ITcountries como el propio ITcountries real, pero después del tratamiento las dos series tendrían que diverger si existiera efecto de tratamiento. A primera vista, parece no haber un efecto de la medida de política. 
+
+
+Figura 1. Tasa de inflación anual: ITcountries Vs Pasíses sin inflation targeting
+
+```{r}
+
+path.plot(synth_out, dataprep_out, Ylab = c("Tasa de inflación"), Xlab = c("Años"), Legend=c("IT countries","Synthetic IT countries"), Legend.position=c("topright"))
+
+```
+
+
+El estimador de control sintético es básicamente una imagen de dos series que, si hay un efecto causal, divergen de otro postratamiento, pero se parecen entre sí antes del tratamiento. Por lo tanto, es común ver una imagen que solo muestra la diferencia entre las dos series.
+
+Figura 2. Gap entre ITcountries observada y synthetic ITcountries. 
+
+```{r}
+
+gaps.plot(synth_out, dataprep_out,  Ylab = c("Gap in inflation prediction error"), Xlab = c("Years"))
+
+```
+
+
+
+Hasta ahora, solo hemos cubierto la estimación. ¿Cómo determinamos si la diferencia observada entre las dos series es una diferencia estadísticamente significativa? Después de todo, solo tenemos dos observaciones por año. Tal vez la divergencia entre las dos series no sea más que un error de predicción, y cualquier modelo elegido lo hubiera hecho, incluso si no hubiera ningún efecto del tratamiento. Abadie, Diamond y Hainmueller (2010) sugieren que usemos un método anticuado para construir p-valores  exactos basados en R. A. Fisher (1935). Firpo y Possebom (2018) denominan a la hipótesis nula utilizada en esta prueba “ningún efecto de tratamiento”, que es la nula más común utilizada en la literatura. Si bien proponen un nulo alternativo para la inferencia, en este ejercicio se emplea el nulo original propuesto por Abadie, Diamond y Hainmueller (2010).  La inferencia de aleatorización asigna el tratamiento a cada unidad no tratada, recalculando los coeficientes clave del modelo y los recopila en una distribución que luego se usa para la inferencia. Abadie, Diamond y Hainmueller (2010) recomiendan calcular un conjunto de valores de la raíz cuadrada del error de predicción cuadrático medio (RMSPE) para el período anterior y posterior al tratamiento como el estadístico de prueba utilizado para la inferencia.
+
+Cálculo del p-valor exacto se basará en asignar el tratamiento a cada estado y reestimar nuestro modelo. ITcountries siempre será devuelto al grupo de donantes cada vez. En esta parte, estamos calculando el post-RMSPE, el pre-RMSPE y la relación de los dos. Una vez que tenemos esta información, podemos calcular un histograma. Como puede ver en el valor p, ITcountries tiene aproximadamente la primera proporción más baja de 23 unidades de países, lo que le da un p-valor de aproximadamente 1 = (23/23). Los cual indica que no es estadísticamente significativa. 
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+placebos <- generate.placebos(dataprep_out, synth_out, Sigf.ipop = 3)
+
+```
+
+
+Figura 3. Histograma de post/pre RMSPE de todas las unidades. 
+
+```{r}
+
+mspe.plot(placebos, discard.extreme = TRUE,  mspe.limit = 1, plot.hist = TRUE)
+
+
+```
+
+
+Ahora queremos crear el gráfico de placebo característico, donde todos los placebos de países se colocan sobre ITcountries. Aquí solo mostraremos la imagen principal con los placebos, aunque se podrían mostrar varios cortes de los datos en los que descarta países cuyo ajuste previo al tratamiento en comparación con ITcountries es bastante pobre.
+
+
+Figura 4.  Distribución de placebos usando angunas unidades como pool de donantes (donor pool). ITcountries es la linea negra más fuerte. 
+
+```{r}
+
+plot_placebos(placebos)
+
+```
+
+
+
+
+
+## Ejemplo 2.  Análisis 1995 a 2020 con año de tratamiento 1999. Método II. 
+
+```{r, include=FALSE, echo=FALSE}
+#rm(list = ls())
+read_data <- function(df)
+{
+  full_path <- paste("https://github.com/LeoEnriquez/SyntheticControl1", 
+                     df, sep = "")
+  df <- read_dta(full_path)
+  return(df)
+}
+
+ITcountriesE <- read_excel("ITcountriesE.xlsx") %>%
+  as.data.frame(.)
+
+```
+
+```{r, include=FALSE, echo=FALSE}
+require(tidysynth)
+
+data("ITcountriesE")
+ITcountriesE %>% dplyr::glimpse()
+
+
+```
+
+```{r, include=FALSE, echo=FALSE}
+require(tidysynth)
+data("ITcountriesE")
+ITcountries %>% dplyr::glimpse()
+
+
+```
+
+El método tiene como objetivo generar una ITcountries sintética utilizando información de un subconjunto de estados de control (el "grupo de donantes") donde no se implementó el régimen Inflation Targeting. El grupo de donantes es el subconjunto de comparaciones de casos del que se toma prestada información para generar una versión sintética de la unidad tratada (“ITcountries”).
+
+
+```{r, include=FALSE, echo=FALSE}
+ITcountriesE_out <-
+  
+  ITcountriesE %>%
+  
+  # initial the synthetic control object
+  synthetic_control(outcome = inflation, # outcome
+                    unit = country, # unit index in the panel data
+                    time = year, # time index in the panel data
+                    i_unit = "ITcountries", # unit where the intervention occurred
+                    i_time = 1999, # time period when the intervention occurred
+                    generate_placebos=T # generate placebo synthetic controls (for inference)
+                    ) %>%
+  
+  # Generate the aggregate predictors used to fit the weights
+  
+  # growth
+  generate_predictor(time_window = 1995:1999,
+                     growth = mean(growth, na.rm = T)) %>%
+                     
+  # Lagged inflation
+  generate_predictor(time_window = 1996,
+                     inflation_1996 = inflation) %>%
+  generate_predictor(time_window = 1997,
+                     inflation_1997 = inflation) %>%
+  generate_predictor(time_window = 1998,
+                     inflation_1998 = inflation) %>%
+  
+  
+  # Generate the fitted weights for the synthetic control
+  generate_weights(optimization_window = 1995:1999, # time to use in the optimization task
+                   margin_ipop = .02,sigf_ipop = 7,bound_ipop = 6 # optimizer options
+  ) %>%
+  
+  # Generate the synthetic control
+  generate_control()
+
+```
+
+
+
+Una vez que se genera el control sintético, se puede evaluar fácilmente el ajuste comparando las tendencias de las series de tiempo sintética y observada. La idea es que las tendencias en el período anterior a la intervención se correspondan estrechamente entre sí.
+
+
+
+Figura 1. 
+
+```{r}
+ITcountriesE_out %>% plot_trends()
+```
+
+Para capturar la cantidad causal (es decir, la diferencia entre lo observado y lo contrafactual), se pueden graficar las diferencias usando plot_differences () 
+
+
+Figura 2. 
+
+```{r}
+ITcountriesE_out %>% plot_differences()
+```
+
+
+Además, se puede examinar fácilmente la ponderación de las unidades y variables en el ajuste. Esto permite ver qué casos se utilizaron, en parte, para generar el control sintético.
+
+
+Figura 3. 
+
+```{r}
+ITcountriesE_out %>% plot_weights()
+```
+
+Otra forma útil de evaluar el control sintético es observar qué tan comparable es el control sintético con las covariables observadas de la unidad tratada.
+
+
+Cuadro 1. 
+
+```{r}
+ITcountriesE_out %>% grab_balance_table()
+```
+
+
+Inferencia
+
+Para la inferencia, el método se basa en repetir el método para cada donante en el grupo de donantes exactamente como se hizo para la unidad tratada, es decir, generar controles sintéticos de placebo. Al establecer generate_placebos = TRUE al inicializar la canalización del sintetizador con control_sintético (), los casos de placebo se generan automáticamente al construir el control sintético de interés. Esto facilita la exploración de la diferencia única entre la unidad observada y la sintética en comparación con los placebos.
+
+
+Figura 4. 
+
+```{r}
+ITcountriesE_out %>% plot_placebos()
+```
+
+
+Tenga en cuenta que la función plot_placebos () elimina automáticamente cualquier placebos que se ajuste mal a los datos en el período de preintervención. La razón para hacerlo es puramente visual: esas unidades tienden a salirse de la escala al trazar los placebos. Para podar, la función analiza el error de predicción cuadrático medio (MSPE) del período anterior a la intervención (es decir, una métrica que refleja qué tan bien se asigna el control sintético a la serie temporal de resultados observados en el período anterior a la intervención). Si un control de placebo tiene un MSPE dos veces superior al caso objetivo (p. Ej., "Ecuador"), entonces se descarta. Para desactivar este comportamiento, establezca prune = FALSE.
+
+Figura 5. 
+
+```{r}
+ITcountriesE_out %>% plot_placebos(prune = FALSE)
+```
+
+Finalmente, Adabie et al. 2010 describe una forma de construir los valores P exactos de Fisher dividiendo la MSPE posterior a la intervención por la MSPE previa a la intervención y luego clasificando todos los casos por esta razón en orden descendente. Luego se construye un valor p tomando el rango / total. La idea es que si el control sintético se ajusta bien a la serie de tiempo observada (MSPE baja en el período previo) y diverge en el período posterior (MSPE alta en el período posterior), entonces hay un efecto significativo debido a la intervención. Si la intervención no tuvo ningún efecto, entonces el postperíodo y el preperíodo deberían seguir mapeándose entre sí bastante bien, produciendo una proporción cercana a 1. Si las unidades de placebo se ajustan a los datos de manera similar, entonces no podemos rechazar la hipótesis nula hipótesis de que la intervención no produce ningún efecto.
+
+Esta proporción se puede trazar fácilmente usando plot_mspe_ratio (), lo que ofrece una idea de la rareza del caso en el que realmente ocurrió la intervención. En este caso del ejercicio,  no se puede rechazar la hipótesis nula. 
+
+
+Figura 6. 
+
+```{r}
+ITcountriesE_out %>% plot_mspe_ratio()
+```
+
+Para obtener información más específica, hay una tabla de significancias que se puede extraer con una de las muchas funciones de prefijo grab_.
+
+```{r}
+ITcountriesE_out %>% grab_signficance()
+```
+
+
+
+
+
+
+
+#### Pruebas adicionales
+
+
+Accessing Data
+
+In addition to the main data pipeline for generating the synthetic control and the plot_ prefix functions for visualizing the output, there are a number of grab_ prefix functions that offer easy access to the data contained within a synth pipeline object.
+
+At its core, a synth pipeline is simply a nested tibble data frame, where each component of the synthetic control pipeline is accessible.
+
+
+```{r}
+ITcountriesE_out
+```
+
+```{r}
+ITcountriesE_out
+```
+
+
+To access the relevant data fields, the grab_ prefix functions come into play.
+
+grab_outcome() : Extract the outcome variable generated by synthetic_control().
+grab_predictors() : Extract the aggregate-level covariates generated by generate_predictor().
+grab_unit_weights(): Extract the unit weights generated by generate_weights().
+grab_predictor_weights() : Extract the predictor variable weights generated by generate_weights().
+grab_loss(): Extract the RMSE loss of the optimized weights generated by generate_weights().
+grab_synthetic_control(): Extract the synthetic control generated using generate_control(). 
+grab_signficance(): Generate inferential statistics comparing the rarity of the unit that actually received the intervention to the placebo units in the donor pool.
+grab_balance_table(): Compare the distributions of the aggregate-level predictors for the observed intervention unit, the synthetic control, and the donor pool average.
+
+
+
+
+```{r}
+ITcountriesE_out %>% grab_synthetic_control()
+```
+
+Note that most all the grab_ functions allow for extraction of the placebo units as well.
+
+```{r}
+ITcountriesE_out %>% grab_synthetic_control(placebo = T)
+```
+
+
+
+But say I really want to unnest()…
+In the current implementation, you can unpack an entire synth pipeline using unnest(). The grab_ function is meant to streamline any specific extraction needs. The entire method is built on top of a tidyverse infrastructure, so one can side-step most of the package’s functionality and interact with the synth pipeline output as one would any nested tbl_df object.
+
+```{r}
+ITcountriesE_out %>% 
+  tidyr::unnest(cols = c(.outcome)) 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
